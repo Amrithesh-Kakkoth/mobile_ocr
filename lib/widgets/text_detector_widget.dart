@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -111,6 +112,10 @@ class TextDetectorWidget extends StatefulWidget {
   /// Controller for imperative text selection actions.
   final TextDetectorController? controller;
 
+  /// When true, only the text overlay is rendered (no image). Use this when
+  /// the image is already displayed by another widget underneath.
+  final bool overlayOnly;
+
   const TextDetectorWidget({
     super.key,
     required this.imagePath,
@@ -123,6 +128,7 @@ class TextDetectorWidget extends StatefulWidget {
     this.debugMode = false,
     this.strings = const TextDetectorStrings(),
     this.controller,
+    this.overlayOnly = false,
   });
 
   @override
@@ -143,6 +149,7 @@ class _TextDetectorWidgetState extends State<TextDetectorWidget> {
   Timer? _editorHintTimer;
   bool _showEditorHint = false;
   bool _isNetworkError = false;
+  Size? _imageSize;
   bool get _hasSelectableText =>
       _detectedTextBlocks != null && _detectedTextBlocks!.isNotEmpty;
 
@@ -205,7 +212,11 @@ class _TextDetectorWidgetState extends State<TextDetectorWidget> {
         _resolvedImagePath = resolvedPath;
       });
 
-      _precacheCurrentImage();
+      if (widget.overlayOnly) {
+        await _readImageDimensions(file);
+      } else {
+        _precacheCurrentImage();
+      }
 
       if (widget.autoDetect) {
         unawaited(_detectText());
@@ -465,6 +476,9 @@ class _TextDetectorWidgetState extends State<TextDetectorWidget> {
     if (imageFile == null || textBlocks == null) {
       return const SizedBox.shrink();
     }
+    if (widget.overlayOnly && _imageSize == null) {
+      return const SizedBox.shrink();
+    }
 
     final TextSelectionThemeData baseSelectionTheme = TextSelectionTheme.of(
       context,
@@ -482,7 +496,8 @@ class _TextDetectorWidgetState extends State<TextDetectorWidget> {
       child: TextSelectionTheme(
         data: overlaySelectionTheme,
         child: TextOverlayWidget(
-          imageFile: imageFile,
+          imageFile: widget.overlayOnly ? null : imageFile,
+          imageSize: widget.overlayOnly ? _imageSize : null,
           textBlocks: textBlocks,
           onTextBlocksSelected: widget.onTextBlocksSelected,
           onTextCopied: widget.onTextCopied,
@@ -661,6 +676,19 @@ class _TextDetectorWidgetState extends State<TextDetectorWidget> {
 
   void _notifyController() {
     widget.controller?._notifyStateChanged();
+  }
+
+  Future<void> _readImageDimensions(File file) async {
+    final bytes = await file.readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    if (!mounted) return;
+    setState(() {
+      _imageSize = Size(
+        frame.image.width.toDouble(),
+        frame.image.height.toDouble(),
+      );
+    });
   }
 
   void _precacheCurrentImage() {

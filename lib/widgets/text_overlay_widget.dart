@@ -48,8 +48,16 @@ class TextOverlayController {
 
 /// A widget that overlays detected text on top of the source image while
 /// providing an editor-like selection experience.
+///
+/// Can operate in two modes:
+/// - **Image mode** (default): Pass [imageFile] and the widget renders the
+///   image with text overlays on top.
+/// - **Overlay-only mode**: Pass [imageSize] instead of [imageFile] and the
+///   widget renders only the transparent text overlay. Use this when the image
+///   is already rendered by another widget (e.g. PhotoView) and you just need
+///   the text selection layer on top.
 class TextOverlayWidget extends StatefulWidget {
-  final File imageFile;
+  final File? imageFile;
   final List<TextBlock> textBlocks;
   final Function(List<TextBlock>)? onTextBlocksSelected;
   final Function(String)? onTextCopied;
@@ -59,9 +67,14 @@ class TextOverlayWidget extends StatefulWidget {
   final bool debugMode;
   final TextOverlayController? controller;
 
+  /// The original image dimensions in pixels. Required when using
+  /// overlay-only mode (no [imageFile]). When [imageFile] is provided
+  /// this is ignored — dimensions are read from the file.
+  final Size? imageSize;
+
   const TextOverlayWidget({
     super.key,
-    required this.imageFile,
+    this.imageFile,
     required this.textBlocks,
     this.onTextBlocksSelected,
     this.onTextCopied,
@@ -70,7 +83,11 @@ class TextOverlayWidget extends StatefulWidget {
     this.enableSelectionPreview = false,
     this.debugMode = false,
     this.controller,
-  });
+    this.imageSize,
+  }) : assert(
+         imageFile != null || imageSize != null,
+         'Either imageFile or imageSize must be provided',
+       );
 
   @override
   State<TextOverlayWidget> createState() => _TextOverlayWidgetState();
@@ -154,7 +171,10 @@ class _TextOverlayWidgetState extends State<TextOverlayWidget> {
       widget.controller?._attach(this);
     }
 
-    if (oldWidget.imageFile.path != widget.imageFile.path) {
+    final bool imageChanged = _isOverlayOnly
+        ? widget.imageSize != oldWidget.imageSize
+        : widget.imageFile?.path != oldWidget.imageFile?.path;
+    if (imageChanged) {
       _resetForNewImage();
       return;
     }
@@ -187,8 +207,21 @@ class _TextOverlayWidgetState extends State<TextOverlayWidget> {
     }
   }
 
+  bool get _isOverlayOnly => widget.imageFile == null;
+
   Future<void> _loadImageDimensions() async {
-    final bytes = await widget.imageFile.readAsBytes();
+    if (widget.imageSize != null) {
+      if (!mounted) return;
+      setState(() {
+        _imageSize = widget.imageSize;
+      });
+      return;
+    }
+
+    final imageFile = widget.imageFile;
+    if (imageFile == null) return;
+
+    final bytes = await imageFile.readAsBytes();
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     final image = frame.image;
@@ -274,33 +307,37 @@ class _TextOverlayWidgetState extends State<TextOverlayWidget> {
             child: InteractiveViewer(
               key: _interactiveViewerKey,
               transformationController: _transformController,
-              minScale: 0.5,
-              maxScale: 4.0,
-              panEnabled: _isPanEnabled,
+              minScale: _isOverlayOnly ? 1.0 : 0.5,
+              maxScale: _isOverlayOnly ? 1.0 : 4.0,
+              panEnabled: _isOverlayOnly ? false : _isPanEnabled,
+              scaleEnabled: !_isOverlayOnly,
               child: Stack(
                 children: [
-                  Center(
-                    child: Image.file(
-                      widget.imageFile,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
-                      frameBuilder:
-                          (context, child, frame, wasSynchronouslyLoaded) {
-                            if (frame != null) {
-                              _scheduleMetricsRebuild(constraints);
-                            }
-                            if (wasSynchronouslyLoaded) {
-                              return child;
-                            }
-                            return AnimatedOpacity(
-                              opacity: frame == null ? 0 : 1,
-                              duration: const Duration(milliseconds: 200),
-                              curve: Curves.easeOut,
-                              child: child,
-                            );
-                          },
-                    ),
-                  ),
+                  if (!_isOverlayOnly)
+                    Center(
+                      child: Image.file(
+                        widget.imageFile!,
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                        frameBuilder:
+                            (context, child, frame, wasSynchronouslyLoaded) {
+                              if (frame != null) {
+                                _scheduleMetricsRebuild(constraints);
+                              }
+                              if (wasSynchronouslyLoaded) {
+                                return child;
+                              }
+                              return AnimatedOpacity(
+                                opacity: frame == null ? 0 : 1,
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOut,
+                                child: child,
+                              );
+                            },
+                      ),
+                    )
+                  else
+                    const SizedBox.expand(),
                   ..._buildEditableBlockOverlays(),
                   ..._buildSelectionHandles(),
                   if (copyButton != null) copyButton,
