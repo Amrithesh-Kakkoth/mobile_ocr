@@ -115,6 +115,14 @@ class TextDetectorWidget extends StatefulWidget {
   /// the image is already displayed by another widget underneath.
   final bool overlayOnly;
 
+  /// Whether to show the "Detecting text..." overlay during processing.
+  /// Defaults to true for backward compatibility.
+  final bool showProcessingOverlay;
+
+  /// Whether to show the selection hint after text is detected.
+  /// Defaults to true for backward compatibility.
+  final bool showEditorHint;
+
   const TextDetectorWidget({
     super.key,
     required this.imagePath,
@@ -128,6 +136,8 @@ class TextDetectorWidget extends StatefulWidget {
     this.strings = const TextDetectorStrings(),
     this.controller,
     this.overlayOnly = false,
+    this.showProcessingOverlay = true,
+    this.showEditorHint = true,
   });
 
   @override
@@ -398,6 +408,16 @@ class _TextDetectorWidgetState extends State<TextDetectorWidget> {
         children: [
           _buildImageLayer(),
           if (showProcessingAnimation) const _ScanLineAnimation(),
+          if (widget.showProcessingOverlay &&
+              _isProcessing &&
+              _detectedTextBlocks == null &&
+              !_userAttemptedInteraction)
+            _buildProcessingOverlay(),
+          if (widget.showEditorHint &&
+              _showEditorHint &&
+              _detectedTextBlocks != null &&
+              _detectedTextBlocks!.isNotEmpty)
+            _buildEditorHint(),
           if (_errorMessage != null)
           Positioned(
             bottom: 32,
